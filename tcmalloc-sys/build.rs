@@ -8,7 +8,16 @@ static TCMALLOC_TAG: &str = "gperftools-2.7";
 
 // Platforms that _someone_ says works
 static TESTED: &[&str] = &[
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-unknown-linux-musl",
+    "aarch64-pc-windows-msvc",
+    "armv7-unknown-linux-gnueabihf",
+    "armv7-unknown-linux-musleabihf",
+    "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
 ];
 
 fn main() {
@@ -29,16 +38,24 @@ fn main() {
     println!("GPERFTOOLS_DIR={:?}", gperftools_dir);
 
     if !TESTED.contains(&target.as_ref()) {
-        println!("cargo:warning=tcmalloc-rs has not been verified to work on target {}", target);
-        return;
+        println!(
+            "cargo:warning=tcmalloc-rs has not been verified to work on target {}",
+            target
+        );
+        //return;
     }
 
     // Clone source to OUT_DIR
     if !out_dir.join("gperftools").exists() {
         assert!(out_dir.exists(), "OUT_DIR does not exist");
         let mut cmd = Command::new("git");
-        cmd.current_dir(&out_dir)
-            .args(&["clone", TCMALLOC_REPO, "--depth=1", "--branch", TCMALLOC_TAG]);
+        cmd.current_dir(&out_dir).args(&[
+            "clone",
+            TCMALLOC_REPO,
+            "--depth=1",
+            "--branch",
+            TCMALLOC_TAG,
+        ]);
         run(&mut cmd);
     }
 
@@ -48,26 +65,28 @@ fn main() {
     if !build_dir.join("Makefile").exists() {
         let autogen = gperftools_dir.join("autogen.sh");
         let mut autogen_cmd = Command::new("sh");
-        autogen_cmd.arg(autogen)
-            .current_dir(&gperftools_dir);
+        autogen_cmd.arg(autogen).current_dir(&gperftools_dir);
         run(&mut autogen_cmd);
 
         let configure = gperftools_dir.join("configure");
         let mut configure_cmd = Command::new("sh");
-        configure_cmd.arg(configure)
-            .current_dir(&build_dir);
+        configure_cmd.arg(configure).current_dir(&build_dir);
         run(&mut configure_cmd);
     }
 
     let mut make_cmd = Command::new("make");
-    make_cmd.current_dir(&build_dir)
+    make_cmd
+        .current_dir(&build_dir)
         .arg("srcroot=../gperftools/")
         .arg("-j")
         .arg(num_jobs);
     run(&mut make_cmd);
 
     println!("cargo:rustc-link-lib=static=tcmalloc");
-    println!("cargo:rustc-link-search=native={}/.libs", build_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}/.libs",
+        build_dir.display()
+    );
     println!("cargo:rerun-if-changed=gperftools");
 }
 
@@ -85,5 +104,3 @@ fn run(cmd: &mut Command) {
         );
     }
 }
-
-

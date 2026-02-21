@@ -71,6 +71,29 @@ fn main() {
         let configure = gperftools_dir.join("configure");
         let mut configure_cmd = Command::new("sh");
         configure_cmd.arg(configure).current_dir(&build_dir);
+        // autotools 的には
+        //   --build = コンパイルしているマシン (Rust の HOST)
+        //   --host  = 生成されるバイナリが動くマシン (Rust の TARGET)
+        configure_cmd.arg(format!("--build={host}"));
+        configure_cmd.arg(format!("--host={target}"));
+
+        // ★ muslターゲット用の重要設定
+        if target.contains("musl") {
+            configure_cmd.arg("--disable-shared");  // staticのみ
+            configure_cmd.arg("--enable-static");   // static有効化
+            configure_cmd.arg("--disable-frame-pointers");  // 不要な依存削減
+            configure_cmd.arg("--disable-unwind");
+    
+            // libstdc++を明示的にリンク（musl環境でも必要）
+            //configure_cmd.env("CXX", "zig c++");
+            //configure_cmd.env("CC", "zig cc");
+            //configure_cmd.env("LD", "zig c++");  // linkerもZig
+
+            // ABI問題回避
+            //configure_cmd.env("CXXFLAGS", "-D_GLIBCXX_USE_CXX11_ABI=1");
+            // prefix付きでcross tools警告解消
+            //configure_cmd.env("PATH", format!("{}:{}", env::var("PATH").unwrap(), "/usr/bin"));
+        }
         run(&mut configure_cmd);
     }
 

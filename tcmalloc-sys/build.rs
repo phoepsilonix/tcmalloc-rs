@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 static TCMALLOC_REPO: &str = "https://github.com/gperftools/gperftools";
-static TCMALLOC_TAG: &str = "gperftools-2.7";
+static TCMALLOC_TAG: &str = "gperftools-2.18";
 
 // Platforms that _someone_ says works
 static TESTED: &[&str] = &[
@@ -82,8 +82,17 @@ fn main() {
             configure_cmd.arg("--disable-shared");  // staticのみ
             configure_cmd.arg("--enable-static");   // static有効化
             configure_cmd.arg("--disable-frame-pointers");  // 不要な依存削減
-            configure_cmd.arg("--disable-unwind");
-    
+            //configure_cmd.arg("--disable-unwind");
+            configure_cmd.arg("--disable-libunwind");          // ← これを追加（libunwind 無効）
+            configure_cmd.arg("--with-tcmalloc-pagesize=4096"); // 任意だが musl で安定しやすい
+            configure_cmd.arg("--enable-minimal");             // 最小構成（tcmalloc_minimal だけビルド）
+            // またはもっと厳密に
+            configure_cmd.arg("--disable-heap-profiler");
+            configure_cmd.arg("--disable-heap-checker");
+            configure_cmd.arg("--disable-profiler");           // これで unwind 依存がかなり減る
+
+            // CFLAGS で強制的にフレームポインタ無効（古い gperftools で unwind 回避）
+            configure_cmd.arg("CFLAGS=-fno-omit-frame-pointer -fno-stack-protector -D_GNU_SOURCE -DBENCHMARK_OS_LINUX");    
             // libstdc++を明示的にリンク（musl環境でも必要）
             //configure_cmd.env("CXX", "zig c++");
             //configure_cmd.env("CC", "zig cc");

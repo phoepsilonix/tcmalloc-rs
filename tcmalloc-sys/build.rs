@@ -63,45 +63,57 @@ fn main() {
 
     // Only run configure once
     if !build_dir.join("Makefile").exists() {
+        // autogen.sh
         let autogen = gperftools_dir.join("autogen.sh");
         let mut autogen_cmd = Command::new("sh");
         autogen_cmd.arg(autogen).current_dir(&gperftools_dir);
         run(&mut autogen_cmd);
 
-        let configure = gperftools_dir.join("configure");
+        // configure
         let mut configure_cmd = Command::new("sh");
-        configure_cmd.arg(configure).current_dir(&build_dir);
-        // autotools 的には
-        //   --build = コンパイルしているマシン (Rust の HOST)
-        //   --host  = 生成されるバイナリが動くマシン (Rust の TARGET)
-        configure_cmd.arg(format!("--build={host}"));
-        configure_cmd.arg(format!("--host={target}"));
+        configure_cmd
+            .arg(gperftools_dir.join("configure"))
+            .current_dir(&build_dir)
+            .arg("--verbose")
+            .arg(format!("--build={}", host))
+            .arg(format!("--host={}", target))
+            .arg("--disable-shared")
+            .arg("--enable-static");
 
-        // ★ muslターゲット用の重要設定
         if target.contains("musl") {
-            configure_cmd.arg("--disable-shared");  // staticのみ
-            configure_cmd.arg("--enable-static");   // static有効化
-            configure_cmd.arg("--disable-frame-pointers");  // 不要な依存削減
-            //configure_cmd.arg("--disable-unwind");
-            configure_cmd.arg("--disable-libunwind");          // ← これを追加（libunwind 無効）
-            configure_cmd.arg("--with-tcmalloc-pagesize=4096"); // 任意だが musl で安定しやすい
-            configure_cmd.arg("--enable-minimal");             // 最小構成（tcmalloc_minimal だけビルド）
-            // またはもっと厳密に
-            configure_cmd.arg("--disable-heap-profiler");
-            configure_cmd.arg("--disable-heap-checker");
-            configure_cmd.arg("--disable-profiler");           // これで unwind 依存がかなり減る
+            //configure_cmd.arg("--enable-minimal");
+            //configure_cmd.arg("--disable-minimal");
 
-            // CFLAGS で強制的にフレームポインタ無効（古い gperftools で unwind 回避）
-            configure_cmd.arg("CFLAGS=-fno-omit-frame-pointer -fno-stack-protector -D_GNU_SOURCE -DBENCHMARK_OS_LINUX");    
-            // libstdc++を明示的にリンク（musl環境でも必要）
-            //configure_cmd.env("CXX", "zig c++");
-            //configure_cmd.env("CC", "zig cc");
-            //configure_cmd.env("LD", "zig c++");  // linkerもZig
+            // disabled unwind, stacktrace
+            //.arg("--disable-backtrace")
+            configure_cmd
+                .arg("--disable-libunwind")
+                .arg("--enable-cxx-stdlib")
+                .arg("--disable-stacktrace-via-backtrace")
+                .arg("--enable-frame-pointers")
+                .arg("--disable-cpu-profiler")
+                .arg("--disable-heap-profiler")
+                .arg("--disable-heap-checker")
+                .arg("--disable-debugalloc");
 
-            // ABI問題回避
-            //configure_cmd.env("CXXFLAGS", "-D_GLIBCXX_USE_CXX11_ABI=1");
-            // prefix付きでcross tools警告解消
-            //configure_cmd.env("PATH", format!("{}:{}", env::var("PATH").unwrap(), "/usr/bin"));
+            //"-D_GNU_SOURCE {} -D__GLIBC_USE_C2X_STRTOL=0 -U__GLIBC_PREREQ -D__GLIBC__=2 -D__GLIBC_MINOR__=27 -U__STRICT_ANSI__ -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE",
+            let cflags = format!(
+                "-D_GNU_SOURCE {} -D__GLIBC__=2 -D__GLIBC_MINOR__=27 -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE",
+                //"-D_GNU_SOURCE {} -D__GLIBC_USE_C2X_STRTOL=0 -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE",
+                env::var("CFLAGS").unwrap_or_default()
+            );
+            let cxxflags = format!(
+                "-D_GNU_SOURCE {} -D__GLIBC__=2 -D__GLIBC_MINOR__=27 -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE {}",
+                env::var("CXXFLAGS").unwrap_or_default(),
+                "-std=c++17");
+            configure_cmd
+                .env("CFLAGS", cflags)
+                .env("CXXFLAGS", cxxflags)
+                .env("PKG_CONFIG_ALLOW_CROSS", "1") // pkg-config が cross 時にも動くように（稀に必要）
+                .env("FORCE_UNSAFE_CONFIGURE", "1"); // 古い autotools で cross 警告を無視したい場合
+
+            //configure_cmd.arg("CFLAGS=-D_GNU_SOURCE -DNO_ISOC23 -U__STRICT_ANSI__");  // C23 を抑え、GNU 拡張を有効
+            //configure_cmd.arg("CXXFLAGS=-D_GNU_SOURCE -DNO_ISOC23 -U__STRICT_ANSI__");
         }
         run(&mut configure_cmd);
     }
@@ -110,11 +122,16 @@ fn main() {
     make_cmd
         .current_dir(&build_dir)
         .arg("srcroot=../gperftools/")
+        .arg("V=1")
+        .arg("libtcmalloc.la")
+        .arg("libtcmalloc_minimal.la")
         .arg("-j")
         .arg(num_jobs);
     run(&mut make_cmd);
 
-    println!("cargo:rustc-link-lib=static=tcmalloc");
+    // static link
+    println!("cargo:rustc-link-lib=static=tcmalloc_minimal");
+
     println!(
         "cargo:rustc-link-search=native={}/.libs",
         build_dir.display()
